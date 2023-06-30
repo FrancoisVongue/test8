@@ -1,73 +1,99 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="200" alt="Nest Logo" /></a>
-</p>
+# Questions
+1. How to change the code to support different file format versions?
+  To support different file formats we would need to create additional 
+  methods for entities that would allow us to convert them from different structures.
+  E.g currently we have `constructor` method that on entity class 
+  that allows us to create instances of an entity.
+  
+  To support different file type I would refactor constructor to take 
+  just properties instead of `YamlNode` and create multiple methods to support 
+  different inputs like this:
+  ```ts
+  export class Country {
+    private constructor(
+      private name: string,
+      private code: string,
+    ) {}
+    
+    static fromYamlNode(node: YamlNode) {
+      // here may be code that extracts data from YamlNode structure
+      return new Country(
+        node.name,
+        node.code,
+      );
+    }
+    static fromJsonNode(node: YamlNode) {
+      return new Country(
+        node.name,
+        node.code,
+      );
+    }
+  }
+  ```
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+2. How will the import system change if in the future we need to get this data from a web API?
+  We could just make http call instead of reaching to hard drive for the file.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://coveralls.io/github/nestjs/nest?branch=master" target="_blank"><img src="https://coveralls.io/repos/github/nestjs/nest/badge.svg?branch=master#9" alt="Coverage" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+3. If in the future it will be necessary to do the calculations using 
+  the national bank rate, how could this be added to the system?
+  
+  Rates don't change very frequently, so they can be stored in the database 
+  in case we want to preserve ability to calculate top 3 countries using just 
+  a single query.
+  
+  We can fetch bank rates regularly and update rows in the database.
 
-## Description
+4. How would it be possible to speed up the execution of requests if 
+  the task allowed you to update market data once a day or even less frequently? 
+  Please explain all possible solutions you could think of.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+  To speed up execution of request in cases when data doesn't change frequently 
+  we can use `caching`.  
+  
+  One way to cache this data would be using materialized view in the postgresql.
+  This way database won't have to recalculate all the rates and exchanges every time
+  we make a request.
+  
+  Another even easier approach would be to store the whole response in the 
+  `redis` key value store. This way we won't bother database at all and 
+  will get results almost immediately from memory.
 
-## Installation
+5. My unfinished database query:
+```sql
+with trades as (
+    select
+        distinct on (R.id)
+        (e.date - R.date) time_since_rate,
+        e.id exchange_id,
+        (R.out / R.in) coeff,
 
-```bash
-$ npm install
+        e.from start_currency,
+        e.ask start_volume,
+        (e.ask * (R.out / R.in)) end_volume,
+        e.to end_currency,
+        e.date exchange_date,
+        e."officeId",
+        e.date,
+        e.id
+    from "Exchange" e
+             join "Rate" R on e."officeId" = R."officeId"
+    where e.date >= R.date
+      and e.to = R."to"
+      and e.from = R."from"
+    order by R.id, time_since_rate asc, e.id
+)
+select
+    distinct R.id,
+             t.start_currency,
+             t.start_volume,
+             start_volume * R.out / R.in start_usd,
+             t.id, *
+from trades t
+join "Rate" R on r."officeId" = t."officeId" and
+                 R.date <= t.date and
+                 R.from = t.start_currency and
+                 R.to = 'USD';
 ```
 
-## Running the app
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Test
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://kamilmysliwiec.com)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](LICENSE).
+I couldn't understand how to move forward from there, because we have 
+sometimes USD ask that doesn't have any rates.
